@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>WearTracker · Live</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --lime:    #d4f54a;
+  --lime2:   #a8c92e;
+  --lime-dim:rgba(212,245,74,0.12);
+  --red:     #ff5252;
+  --red-dim: rgba(255,82,82,0.10);
+  --blue:    #60a5fa;
+  --bg:      #050608;
+  --bg2:     #0c0e12;
+  --bg3:     #111418;
+  --bg4:     #181c22;
+  --border:  rgba(255,255,255,0.06);
+  --border2: rgba(255,255,255,0.11);
+  --text:    #eceef2;
+  --muted:   #3d4350;
+  --muted2:  #5a6175;
+  --mono:    'DM Mono', monospace;
+  --sans:    'Outfit', sans-serif;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100svh;
+  max-width: 480px;
+  margin: 0 auto;
+  padding-bottom: 48px;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::after {
+  content:'';position:fixed;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.025) 3px,rgba(0,0,0,0.025) 4px);
+  pointer-events:none;z-index:9999;
+}
+
+.orb {
+  position:fixed;top:-160px;left:50%;
+  transform:translateX(-50%);
+  width:600px;height:600px;border-radius:50%;
+  background:radial-gradient(ellipse,rgba(212,245,74,0.055) 0%,transparent 62%);
+  pointer-events:none;transition:background 1.4s ease;z-index:0;
+}
+.orb.hot{background:radial-gradient(ellipse,rgba(212,245,74,0.16) 0%,transparent 62%);}
+
+.hdr {
+  position:relative;z-index:2;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:24px 20px 0;
+}
+.logo-row{display:flex;align-items:center;gap:12px;}
+.logo-mark {
+  width:38px;height:38px;border-radius:12px;flex-shrink:0;
+  background:linear-gradient(140deg,#d4f54a 0%,#60a5fa 100%);
+  display:flex;align-items:center;justify-content:center;
+}
+.logo-mark svg{width:19px;height:19px;}
+.logo-name{font-size:16px;font-weight:700;letter-spacing:-.4px;line-height:1.1;}
+.logo-sub{font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase;margin-top:2px;}
+.badge {
+  font-family:var(--mono);font-size:9px;letter-spacing:1px;text-transform:uppercase;
+  padding:5px 11px;border-radius:6px;border:1px solid var(--border2);color:var(--muted2);
+  display:flex;align-items:center;gap:6px;transition:all .4s;
+}
+.badge.live{color:var(--lime);border-color:rgba(212,245,74,.3);background:rgba(212,245,74,.06);}
+.badge.err{color:var(--red);border-color:rgba(255,82,82,.3);background:rgba(255,82,82,.06);}
+.bdot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+.badge.live .bdot{animation:pulse 1.5s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.25;transform:scale(.6)}}
+
+.hero-card {
+  position:relative;z-index:1;
+  margin:20px 20px 0;
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:24px;overflow:hidden;
+}
+.hero-stripe {
+  height:3px;
+  background:linear-gradient(90deg,transparent 0%,var(--lime) 50%,transparent 100%);
+  opacity:0;transition:opacity .6s;
+}
+.hero-card.contact .hero-stripe{opacity:1;}
+.hero-body{padding:22px 22px 20px;}
+.hero-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;}
+.s-label{font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;}
+.s-val{font-size:40px;font-weight:800;line-height:1;letter-spacing:-2.5px;color:var(--muted);transition:color .5s,text-shadow .5s;}
+.s-val.on{color:var(--lime);text-shadow:0 0 30px rgba(212,245,74,.25);}
+.s-raw{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:8px;transition:color .4s;}
+.s-raw.on{color:var(--muted2);}
+
+.arc-group{flex-shrink:0;text-align:center;}
+.arc-svg{width:76px;height:76px;transform:rotate(-90deg);display:block;overflow:visible;}
+.arc-track{fill:none;stroke:rgba(255,255,255,0.05);stroke-width:7;}
+.arc-fill{
+  fill:none;stroke:var(--lime);stroke-width:7;stroke-linecap:round;
+  stroke-dasharray:201;stroke-dashoffset:201;
+  transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1);
+  filter:drop-shadow(0 0 6px rgba(212,245,74,.5));
+}
+.arc-pct{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--lime);margin-top:6px;letter-spacing:-.5px;}
+
+.time-grid{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--border);}
+.time-cell{padding:14px 0 0;}
+.time-cell:first-child{padding-right:16px;border-right:1px solid var(--border);}
+.time-cell:last-child{padding-left:16px;}
+.t-label{font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:5px;}
+.t-val{font-family:var(--mono);font-size:21px;font-weight:500;letter-spacing:-.5px;color:var(--text);}
+.t-val.wear{color:var(--lime);}
+
+.panel {
+  position:relative;z-index:1;
+  margin:10px 20px 0;background:var(--bg2);
+  border:1px solid var(--border);border-radius:20px;
+  padding:18px 18px 16px;overflow:hidden;
+}
+.panel-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.p-title{font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:2px;text-transform:uppercase;}
+
+.ratio-wrap{display:flex;align-items:center;gap:10px;}
+.ratio-bg{flex:1;height:6px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden;}
+.ratio-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--lime2),var(--lime));transition:width .9s cubic-bezier(.4,0,.2,1);box-shadow:0 0 8px rgba(212,245,74,.4);}
+.ratio-num{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--lime);min-width:42px;text-align:right;}
+
+.thresh-tag{font-family:var(--mono);font-size:9px;background:rgba(255,82,82,.08);border:1px solid rgba(255,82,82,.2);color:var(--red);border-radius:4px;padding:3px 7px;letter-spacing:.5px;}
+
+.bars{display:flex;align-items:flex-end;height:52px;gap:2px;}
+.bar{flex:1;border-radius:2px 2px 0 0;min-height:3px;transition:height .2s ease,background .3s;}
+.bar.contact{background:var(--lime);opacity:.8;}
+.bar.air{background:rgba(255,255,255,.07);}
+.spark-foot{display:flex;justify-content:space-between;margin-top:8px;}
+.spark-foot span{font-family:var(--mono);font-size:9px;color:var(--muted2);}
+.spark-foot .now{color:var(--lime);}
+
+.sess-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.sess-count{font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:1px;}
+table{width:100%;border-collapse:collapse;}
+thead tr{border-bottom:1px solid rgba(255,255,255,.05);}
+th{font-family:var(--mono);color:var(--muted);font-weight:400;text-align:left;padding:0 0 8px;font-size:9px;text-transform:uppercase;letter-spacing:1px;}
+td{font-family:var(--mono);color:var(--muted2);padding:7px 0;border-bottom:1px solid rgba(255,255,255,.025);font-size:11px;}
+tr:last-child td{border-bottom:none;}
+td.hi{color:var(--lime);}
+td:nth-child(2){text-align:center;}
+td:last-child,th:last-child{text-align:right;}
+.live-tag{display:inline-flex;align-items:center;gap:4px;background:rgba(212,245,74,.07);border:1px solid rgba(212,245,74,.2);color:var(--lime);border-radius:3px;padding:2px 6px;font-size:9px;font-weight:500;letter-spacing:1px;}
+.live-dot-sm{width:4px;height:4px;border-radius:50%;background:var(--lime);animation:pulse 1.4s infinite;}
+
+.reset-btn {
+  position:relative;z-index:1;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:calc(100% - 40px);margin:12px 20px 0;
+  padding:15px;cursor:pointer;
+  background:var(--red-dim);border:1px solid rgba(255,82,82,.22);
+  border-radius:16px;color:var(--red);
+  font-family:var(--sans);font-size:13px;font-weight:500;letter-spacing:.2px;
+  transition:background .2s,border-color .2s,transform .15s;
+}
+.reset-btn:hover{background:rgba(255,82,82,.16);border-color:rgba(255,82,82,.38);}
+.reset-btn:active{transform:scale(.98);}
+.reset-icon{width:16px;height:16px;flex-shrink:0;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;fill:none;}
+
+.overlay{
+  display:none;position:fixed;inset:0;z-index:200;
+  background:rgba(0,0,0,.75);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  align-items:flex-end;justify-content:center;padding:0 0 28px;
+}
+.overlay.show{display:flex;}
+.modal{
+  background:#13161c;border:1px solid var(--border2);border-radius:24px;
+  padding:28px 24px 22px;width:calc(100% - 40px);max-width:420px;
+  text-align:center;box-shadow:0 -32px 80px rgba(0,0,0,.7);
+  animation:slide-up .25s cubic-bezier(.4,0,.2,1);
+}
+@keyframes slide-up{from{transform:translateY(24px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-ring{width:52px;height:52px;border-radius:50%;background:rgba(255,82,82,.1);border:1px solid rgba(255,82,82,.25);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;}
+.modal-ring svg{width:22px;height:22px;stroke:var(--red);stroke-width:2;stroke-linecap:round;fill:none;}
+.modal-title{font-size:17px;font-weight:700;letter-spacing:-.4px;margin-bottom:8px;}
+.modal-desc{font-size:12px;color:var(--muted2);line-height:1.7;margin-bottom:22px;font-family:var(--mono);}
+.modal-btns{display:flex;gap:10px;}
+.btn-cancel{flex:1;padding:14px;background:rgba(255,255,255,.05);border:1px solid var(--border2);border-radius:12px;color:var(--muted2);font-family:var(--sans);font-size:14px;cursor:pointer;transition:background .2s;}
+.btn-cancel:hover{background:rgba(255,255,255,.09);}
+.btn-confirm{flex:1;padding:14px;background:linear-gradient(135deg,#ff5252,#cc2b2b);border:none;border-radius:12px;color:#fff;font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 24px rgba(255,82,82,.3);transition:opacity .2s,transform .1s;}
+.btn-confirm:hover{opacity:.88;}
+.btn-confirm:active{transform:scale(.97);}
+
+.toast{
+  position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:#1a1e26;border:1px solid var(--border2);border-radius:10px;
+  padding:10px 18px;font-family:var(--mono);font-size:11px;color:var(--text);
+  white-space:nowrap;letter-spacing:.3px;opacity:0;
+  transition:opacity .3s,transform .3s;z-index:300;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.toast.ok{color:var(--lime);}
+.toast.fail{color:var(--red);}
+
+.footer{position:relative;z-index:1;text-align:center;margin-top:32px;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;}
+</style>
+</head>
+<body>
+
+<div class="orb" id="orb"></div>
+
+<script>
+const CONFIG = {
+  host:       'b0cea97fe9aa4501bace457294eac479.s1.eu.hivemq.cloud',
+  port:       8884,
+  username:   'GAURABUDISHA',
+  password:   'gaurabudishA@2026',
+  topic:      'weartracker/data',
+  resetTopic: 'weartracker/cmd',
+};
+</script>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="logo-row">
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#050608" stroke-width="2.5" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-name">WearTracker</div>
+      <div class="logo-sub">ESP32 · GPIO4 · Cloud</div>
+    </div>
+  </div>
+  <div class="badge" id="badge">
+    <span class="bdot"></span>
+    <span id="badge-txt">Connecting</span>
+  </div>
+</div>
+
+<!-- HERO CARD -->
+<div class="hero-card" id="hero-card">
+  <div class="hero-stripe"></div>
+  <div class="hero-body">
+    <div class="hero-top">
+      <div>
+        <div class="s-label">Contact status</div>
+        <div class="s-val" id="s-val">WAITING</div>
+        <div class="s-raw" id="s-raw">raw: —</div>
+      </div>
+      <div class="arc-group">
+        <svg class="arc-svg" viewBox="0 0 76 76">
+          <circle class="arc-track" cx="38" cy="38" r="32"/>
+          <circle class="arc-fill" id="arc" cx="38" cy="38" r="32"/>
+        </svg>
+        <div class="arc-pct" id="arc-pct">0.0%</div>
+      </div>
+    </div>
+    <div class="time-grid">
+      <div class="time-cell">
+        <div class="t-label">Wear time</div>
+        <div class="t-val wear" id="t-wear">--:--:--</div>
+      </div>
+      <div class="time-cell">
+        <div class="t-label">Total elapsed</div>
+        <div class="t-val" id="t-total">--:--:--</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- WEAR RATIO -->
+<div class="panel">
+  <div class="panel-hdr">
+    <span class="p-title">Wear ratio</span>
+    <span class="ratio-num" id="ratio-num">0.0%</span>
+  </div>
+  <div class="ratio-wrap">
+    <div class="ratio-bg"><div class="ratio-fill" id="ratio-fill" style="width:0%"></div></div>
+  </div>
+</div>
+
+<!-- SPARKLINE -->
+<div class="panel">
+  <div class="panel-hdr">
+    <span class="p-title">Touch signal</span>
+    <span class="thresh-tag" id="thresh-tag">threshold: —</span>
+  </div>
+  <div class="bars" id="spark"></div>
+  <div class="spark-foot">
+    <span>30 reads ago</span>
+    <span class="now" id="raw-now">now: —</span>
+  </div>
+</div>
+
+<!-- SESSIONS -->
+<div class="panel">
+  <div class="sess-hdr">
+    <span class="p-title">Contact sessions</span>
+    <span class="sess-count" id="sess-count">0 sessions</span>
+  </div>
+  <table>
+    <thead><tr><th>Start</th><th>End</th><th>Duration</th></tr></thead>
+    <tbody id="sess-body"></tbody>
+  </table>
+</div>
+
+<!-- RESET BUTTON -->
+<button class="reset-btn" onclick="openModal()">
+  <svg class="reset-icon" viewBox="0 0 24 24">
+    <polyline points="1 4 1 10 7 10"/>
+    <path d="M3.51 15a9 9 0 1 0 .49-4.95"/>
+  </svg>
+  Reset timers &amp; sessions
+</button>
+
+<div class="footer">weartracker · mqtt cloud · esp32</div>
+
+<!-- MODAL -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-ring">
+      <svg viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+    </div>
+    <div class="modal-title">Reset all data?</div>
+    <div class="modal-desc">Wear time, total time and the full session log will be permanently cleared on the ESP32.</div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-confirm" onclick="doReset()">Reset</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+const CIRC = 2 * Math.PI * 32;
+const MQTT_URL = `wss://${CONFIG.host}:${CONFIG.port}/mqtt`;
+
+function setBadge(state) {
+  document.getElementById('badge').className = 'badge ' + (state === 'live' ? 'live' : state === 'err' ? 'err' : '');
+  document.getElementById('badge-txt').textContent = state === 'live' ? 'Live' : state === 'err' ? 'Error' : 'Connecting';
+}
+
+function setArc(pct) {
+  document.getElementById('arc').style.strokeDashoffset = CIRC - (Math.min(pct, 100) / 100) * CIRC;
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function openModal()  { document.getElementById('overlay').classList.add('show'); }
+function closeModal() { document.getElementById('overlay').classList.remove('show'); }
+
+document.getElementById('overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+const client = mqtt.connect(MQTT_URL, {
+  username: CONFIG.username,
+  password: CONFIG.password,
+  clientId: 'wt-web-' + Math.random().toString(16).slice(2, 8),
+  reconnectPeriod: 3000,
+  connectTimeout: 10000,
+});
+
+client.on('connect', () => { setBadge('live'); client.subscribe(CONFIG.topic); });
+client.on('error',   () => setBadge('err'));
+client.on('offline', () => setBadge(''));
+client.on('reconnect', () => setBadge(''));
+
+client.on('message', (_t, payload) => {
+  let d; try { d = JSON.parse(payload.toString()); } catch { return; }
+  const on = d.contact;
+
+  document.getElementById('orb').className = 'orb' + (on ? ' hot' : '');
+  document.getElementById('hero-card').classList.toggle('contact', on);
+
+  const sv = document.getElementById('s-val');
+  sv.textContent = on ? 'IN CONTACT' : 'NO CONTACT';
+  sv.className = 's-val' + (on ? ' on' : '');
+
+  const sr = document.getElementById('s-raw');
+  sr.textContent = 'raw: ' + d.raw;
+  sr.className = 's-raw' + (on ? ' on' : '');
+
+  const pct = parseFloat(d.ratio);
+  setArc(pct);
+  document.getElementById('arc-pct').textContent   = pct.toFixed(1) + '%';
+  document.getElementById('t-wear').textContent    = d.wear;
+  document.getElementById('t-total').textContent   = d.total;
+  document.getElementById('ratio-num').textContent = pct.toFixed(1) + '%';
+  document.getElementById('ratio-fill').style.width = Math.min(pct, 100) + '%';
+  document.getElementById('thresh-tag').textContent = 'threshold: ' + d.threshold;
+  document.getElementById('raw-now').textContent   = 'now: ' + d.raw;
+
+  const spark = document.getElementById('spark');
+  spark.innerHTML = '';
+  const mx = Math.max(...d.rawbuf, 40);
+  d.rawbuf.forEach(v => {
+    const b = document.createElement('div');
+    b.className = 'bar ' + (v < d.threshold ? 'contact' : 'air');
+    b.style.height = Math.max(6, Math.round((v / mx) * 100)) + '%';
+    spark.appendChild(b);
+  });
+
+  const sessions = d.sessions || [];
+  document.getElementById('sess-count').textContent =
+    sessions.length + ' session' + (sessions.length !== 1 ? 's' : '');
+  const tbody = document.getElementById('sess-body');
+  tbody.innerHTML = '';
+  sessions.slice().reverse().forEach(s => {
+    const tr = document.createElement('tr');
+    const endCell = s.active
+      ? '<span class="live-tag"><span class="live-dot-sm"></span>now</span>'
+      : s.end;
+    tr.innerHTML = `<td>${s.start}</td><td>${endCell}</td><td class="${s.active ? 'hi' : ''}">${s.dur}</td>`;
+    tbody.appendChild(tr);
+  });
+});
+
+function doReset() {
+  closeModal();
+  client.publish(CONFIG.resetTopic, 'RESET', { qos: 1 }, err => {
+    if (err) {
+      showToast('Reset failed — not connected', 'fail');
+    } else {
+      showToast('Reset sent to ESP32', 'ok');
+      document.getElementById('t-wear').textContent    = '00:00:00';
+      document.getElementById('t-total').textContent   = '00:00:00';
+      document.getElementById('ratio-num').textContent = '0.0%';
+      document.getElementById('ratio-fill').style.width = '0%';
+      document.getElementById('arc-pct').textContent   = '0.0%';
+      document.getElementById('sess-body').innerHTML   = '';
+      document.getElementById('sess-count').textContent = '0 sessions';
+      setArc(0);
+    }
+  });
+}
+</script>
+</body>
+</html>
